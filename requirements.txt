@@ -1,0 +1,21 @@
+# Core AWS and Bedrock dependencies
+boto3
+botocore
+langchain
+bedrock-agentcore
+bedrock-agentcore-starter-toolkit
+
+# LangChain dependencies
+langchain-core
+langchain-aws
+langgraph
+langsmith
+
+# Configuration and utilities
+pyyaml
+python-dotenv
+pyjwt[crypto]
+
+# Observability
+opentelemetry-instrumentation
+opentelemetry-api

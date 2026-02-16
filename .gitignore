@@ -1,0 +1,40 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.python-version
+
+# Environment and local notes
+.env
+.env.local
+.scratchpad.md
+
+# AWS and deployment
+.aws/
+*.pem
+*.key
+cognito_config.json
+*_credentials.json
+*_secrets.json
+
+# Bedrock AgentCore cache and config
+.bedrock_agentcore/
+.bedrock_agentcore.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+logs/
+*.log
+
+# Docker
+.dockerignore
