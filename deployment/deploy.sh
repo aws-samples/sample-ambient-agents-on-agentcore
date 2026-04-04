@@ -40,7 +40,7 @@ REQUIRED_VARS=(
 
 # These are the M2M variables that are used to generate a bearer token to invoke the
 # agent that runs on AgentCore runtime
-OPTIONAL_M2M_VARS=(
+M2M_VARS=(
     "COGNITO_DOMAIN_URL"
     "M2M_CLIENT_ID"
     "M2M_CLIENT_SECRET"
@@ -54,29 +54,14 @@ for var in "${REQUIRED_VARS[@]}"; do
     fi
 done
 
-M2M_CONFIGURED=true
-
-for var in "${OPTIONAL_M2M_VARS[@]}"; do
+for var in "${M2M_VARS[@]}"; do
     if [ -z "${!var}" ]; then
-        M2M_CONFIGURED=false
-        break
+        echo "❌ Error: Required authentication variable $var is not set"
+        exit 1
     fi
 done
 
-if [ "$M2M_CONFIGURED" = false ]; then
-    echo "❌ Error: No valid authentication method configured"
-    echo "Please configure either:"
-    echo "  1. M2M credentials (recommended): COGNITO_DOMAIN_URL, M2M_CLIENT_ID, M2M_CLIENT_SECRET, RESOURCE_SERVER_ID"
-    echo "  2. Username/password: COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_CLIENT_SECRET, COGNITO_USERNAME, COGNITO_PASSWORD"
-    exit 1
-fi
-
-if [ "$M2M_CONFIGURED" = true ]; then
-    echo "✅ Using M2M client credentials authentication (recommended)"
-else
-    echo "⚠️  Using username/password authentication (fallback)"
-    echo "    Note: Requires USER_PASSWORD_AUTH flow enabled in Cognito app client"
-fi
+echo "✅ Using M2M client credentials authentication"
 
 echo "✅ All required environment variables are set"
 echo ""
@@ -127,7 +112,7 @@ aws iam attach-role-policy \
     --role-name "$LAMBDA_ROLE_NAME" \
     --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" || true
 
-# Create and attach custom policy for CloudWatch and Cognito
+# Create and attach custom policy for CloudWatch access used by the agent prompt.
 cat > /tmp/lambda-custom-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -143,13 +128,6 @@ cat > /tmp/lambda-custom-policy.json <<EOF
         "logs:GetLogEvents"
       ],
       "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cognito-idp:InitiateAuth"
-      ],
-      "Resource": "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/${COGNITO_USER_POOL_ID}"
     }
   ]
 }
@@ -209,17 +187,9 @@ if aws lambda get-function --function-name "$LAMBDA_FUNCTION_NAME" 2>/dev/null; 
     # Build environment variables based on what's configured
     ENV_VARS="AGENTCORE_RUNTIME_URL=${AGENTCORE_RUNTIME_URL},SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL},SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}"
 
-    # Add M2M credentials if configured
-    if [ "$M2M_CONFIGURED" = true ]; then
-        ENV_VARS="${ENV_VARS},COGNITO_DOMAIN_URL=${COGNITO_DOMAIN_URL},M2M_CLIENT_ID=${M2M_CLIENT_ID},M2M_CLIENT_SECRET=${M2M_CLIENT_SECRET}"
-        if [ -n "$RESOURCE_SERVER_ID" ]; then
-            ENV_VARS="${ENV_VARS},RESOURCE_SERVER_ID=${RESOURCE_SERVER_ID}"
-        fi
-    fi
-
-    # Add username/password credentials if configured
-    if [ "$USER_CONFIGURED" = true ]; then
-        ENV_VARS="${ENV_VARS},COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID},COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID},COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET},COGNITO_USERNAME=${COGNITO_USERNAME},COGNITO_PASSWORD=${COGNITO_PASSWORD}"
+    ENV_VARS="${ENV_VARS},COGNITO_DOMAIN_URL=${COGNITO_DOMAIN_URL},M2M_CLIENT_ID=${M2M_CLIENT_ID},M2M_CLIENT_SECRET=${M2M_CLIENT_SECRET}"
+    if [ -n "$RESOURCE_SERVER_ID" ]; then
+        ENV_VARS="${ENV_VARS},RESOURCE_SERVER_ID=${RESOURCE_SERVER_ID}"
     fi
 
     # Update environment variables
@@ -236,17 +206,9 @@ else
     # Build environment variables based on what's configured
     ENV_VARS="AGENTCORE_RUNTIME_URL=${AGENTCORE_RUNTIME_URL},SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL},SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}"
 
-    # Add M2M credentials if configured
-    if [ "$M2M_CONFIGURED" = true ]; then
-        ENV_VARS="${ENV_VARS},COGNITO_DOMAIN_URL=${COGNITO_DOMAIN_URL},M2M_CLIENT_ID=${M2M_CLIENT_ID},M2M_CLIENT_SECRET=${M2M_CLIENT_SECRET}"
-        if [ -n "$RESOURCE_SERVER_ID" ]; then
-            ENV_VARS="${ENV_VARS},RESOURCE_SERVER_ID=${RESOURCE_SERVER_ID}"
-        fi
-    fi
-
-    # Add username/password credentials if configured
-    if [ "$USER_CONFIGURED" = true ]; then
-        ENV_VARS="${ENV_VARS},COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID},COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID},COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET},COGNITO_USERNAME=${COGNITO_USERNAME},COGNITO_PASSWORD=${COGNITO_PASSWORD}"
+    ENV_VARS="${ENV_VARS},COGNITO_DOMAIN_URL=${COGNITO_DOMAIN_URL},M2M_CLIENT_ID=${M2M_CLIENT_ID},M2M_CLIENT_SECRET=${M2M_CLIENT_SECRET}"
+    if [ -n "$RESOURCE_SERVER_ID" ]; then
+        ENV_VARS="${ENV_VARS},RESOURCE_SERVER_ID=${RESOURCE_SERVER_ID}"
     fi
 
     aws lambda create-function \

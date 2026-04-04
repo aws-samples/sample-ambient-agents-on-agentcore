@@ -9,7 +9,6 @@ dependencies = [
     "boto3",
     "botocore",
     "bedrock-agentcore",
-    "bedrock-agentcore-starter-toolkit",
     # LangChain dependencies
     "langchain-core",
     "langchain-aws",
@@ -22,7 +21,6 @@ dependencies = [
     # Observability
     "opentelemetry-instrumentation",
     "opentelemetry-api",
-    "zmq>=0.0.0",
     "langchain>=1.0.5",
 ]
 

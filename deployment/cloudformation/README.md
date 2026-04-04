@@ -30,7 +30,8 @@ One-click deployment for AgentWatch AWS CloudWatch Monitoring Agent with Slack i
 ## Prerequisites
 
 - AWS CLI configured with appropriate credentials
-- Python 3.10+ (for AgentCore CLI)
+- Python 3.12+ (for local development helpers)
+- Node.js 20+ (for the latest AgentCore CLI)
 - Slack App with:
   - Incoming Webhook URL
   - Signing Secret
@@ -83,11 +84,20 @@ aws cloudformation deploy \
 
 ```bash
 # From project root
-pip install bedrock-agentcore-starter-toolkit
-agentcore launch --agent AgentWatch
+python deployment/sync_agentcore_config.py --stack-name agentwatch
+./deployment/deploy_agentcore.sh --stack-name agentwatch --wait
 ```
 
 ### 2. Update Stack with AgentCore URL
+
+Fetch the deployed runtime URL:
+
+```bash
+# From project root
+python get_agent_url.py
+```
+
+Then update the stack:
 
 ```bash
 aws cloudformation update-stack \
@@ -108,28 +118,9 @@ aws cloudformation update-stack \
 3. Create `/ask` command
 4. Set Request URL to stack output `SlackCommandEndpoint`
 
-### 4. Add AgentCore IAM Permissions
+### 4. AgentCore Permissions
 
-```bash
-aws iam put-role-policy \
-  --role-name <YOUR_AGENTCORE_ROLE> \
-  --policy-name CloudWatchMonitoringAccess \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:DescribeAlarms",
-        "cloudwatch:ListDashboards",
-        "cloudwatch:GetDashboard",
-        "logs:DescribeLogGroups",
-        "logs:FilterLogEvents",
-        "logs:GetLogEvents"
-      ],
-      "Resource": "*"
-    }]
-  }'
-```
+The included `agentcore/cdk` project configures the runtime IAM permissions required for CloudWatch, CloudWatch Logs, and STS access. No extra manual policy attachment is required for the default deployment flow.
 
 ## Stack Outputs
 
@@ -138,7 +129,7 @@ aws iam put-role-policy \
 | `SlackCommandEndpoint` | URL for Slack slash command |
 | `CognitoDomainUrl` | Cognito OAuth2 endpoint |
 | `M2MClientId` | Client ID for authentication |
-| `M2MSecretArn` | Secrets Manager ARN |
+| `M2MSecretArn` | Secrets Manager ARN for supplemental M2M metadata created by the stack |
 
 ## Resources Created
 
@@ -146,7 +137,7 @@ aws iam put-role-policy \
 - **Lambda Function** - Monitoring and Slack integration
 - **API Gateway** - Slack slash commands endpoint
 - **EventBridge Rule** - Scheduled monitoring (15 min)
-- **Secrets Manager** - M2M credentials storage
+- **Secrets Manager** - Supplemental M2M metadata created by the stack
 - **IAM Role** - Lambda execution permissions
 
 ## Deleting the Stack
@@ -161,8 +152,8 @@ aws cloudformation delete-stack --stack-name agentwatch
 |-------|----------|
 | Lambda timeout | Check AgentCore URL, verify Cognito credentials |
 | Slack not receiving | Verify webhook URL, check Lambda logs |
-| Auth failures | Check M2M secret, verify Cognito domain |
-| AgentCore errors | Run `agentcore launch`, check IAM permissions |
+| Auth failures | Check the M2M client secret returned by `deploy-stack.sh`, verify Cognito domain and client ID |
+| AgentCore errors | Run `./deployment/deploy_agentcore.sh`, then verify `agentcore status` and the runtime URL returned by `python get_agent_url.py` |
 
 ## Cost Estimate
 

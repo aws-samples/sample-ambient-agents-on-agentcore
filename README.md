@@ -24,13 +24,13 @@ Ambient agents are also not the solution to everything. Thinking about bringing 
 
 ### AgentWatch
 
-AgentWatch is a sample implementation of an ambient agent that is a hybrid ambient agent. There are some tasks that it performs that are fully autonomous (that are low on risk, for example referring to the AWS accounts and doing monitoring of resource utilization and providing the user with some information) and then there are some user actions that the user can configure and provide to the agent - for example analyzing the causes of alarms in the AWS account and fixing for it.
+AgentWatch is a sample implementation of a hybrid ambient agent. AgentWatch performs tasks that are fully autonomous and low risk, such as checking AWS accounts for CloudWatch alarms and recent logs and then posting monitoring summaries. It also supports user-initiated investigation through Slack, where users can ask follow-up questions about alarms, dashboards, and log data in the monitored AWS environment.
 
 Several organizations use different platforms for communication. I recently attended an Anthropic event where someone mentioned: "AI is going to catch up to pace faster than we think it is", which means that organizations are going to be structured differently and you are going to be working with autonomous workers (or agents) over Slack that will be able to accomplish tasks faster, more efficiently and have a much tighter loop with the end users. For the purpose of this solution, we use **Slack** as the end user interface where the ambient agent will be posting messages to and from where end users will then interact with the agent on demand as well.
 
 ## Human in the Loop in Ambient Agents
 
-Human-in-the-loop (HITL) is a fundamental component for building trustworthy ambient agents. While ambient agents operate autonomously and respond to event streams, they must know when to involve humans in their decision-making process. AgentWatch implements three core HITL patterns that balance autonomy with appropriate human oversight.
+Human-in-the-loop (HITL) is a fundamental component for building trustworthy ambient agents. While ambient agents operate autonomously and respond to event streams, they must know when to involve humans in their decision-making process. AgentWatch is designed around three core HITL patterns, although the current repository fully implements scheduled notifications and user-initiated investigation, while review-style approval flows remain an extension point.
 
 ### The Three HITL Patterns
 
@@ -40,11 +40,11 @@ The notify pattern alerts users about important events without taking any action
 
 **2. Question Pattern**
 
-The question pattern enables the agent to ask users for clarification when it encounters uncertainty about how to proceed. This prevents the agent from making incorrect assumptions or taking inappropriate actions when faced with ambiguous situations. For example, if AgentWatch detects a critical alarm but is unclear whether to proceed with automated remediation or escalate to an on-call engineer, it can post a question to Slack asking for guidance. Similarly, when attempting to modify AWS resources or perform sensitive operations, the agent can ask for clarification on the specific approach to take, similar to how an SRE would consult with a senior administrator before making significant changes to production systems.
+The question pattern enables users to investigate issues interactively through Slack when scheduled monitoring surfaces something that needs more detail. In this sample, users ask follow-up questions with a Slack slash command and the agent responds using current CloudWatch dashboards, alarms, and logs. A fully ambient clarification loop, where the agent proactively asks the user for guidance before taking a next step, is not wired into this repository.
 
 **3. Review Pattern**
 
-The review pattern allows users to approve, reject, or edit actions before the agent executes them. This is particularly important for sensitive operations where human judgment is required. In AgentWatch, this pattern can be applied when the agent wants to perform potentially impactful actions such as modifying AWS resources, adjusting scaling policies, or changing alarm thresholds. The agent presents its proposed action to the user via Slack, along with relevant context and reasoning. The user can then approve the action to proceed, reject it entirely, or edit the parameters before execution. This ensures that critical decisions remain under human control while still benefiting from the agent's ability to identify issues and propose solutions.
+The review pattern allows users to approve, reject, or edit actions before the agent executes them. This is particularly important for sensitive operations where human judgment is required. AgentWatch does not execute write operations in this repository, so the review pattern is described here as a natural next step for teams that want to extend the sample into remediation workflows such as adjusting alarm thresholds or changing scaling policies.
 
 These HITL patterns lower implementation risks by ensuring appropriate human oversight, mimic natural human communication patterns found in engineering teams, and enable the agent to learn from user feedback over time to better align with organizational preferences and policies.
 
@@ -88,9 +88,10 @@ Before deploying AgentWatch, ensure you have the following:
 
 - **AWS Account** with appropriate permissions to create Lambda functions, IAM roles, EventBridge rules, and API Gateway resources
 - **AWS CLI** installed and configured with credentials
-- **Python 3.10+** for local development and AgentCore CLI
+- **Python 3.12+** for local development
+- **Node.js 20+** for the latest AgentCore CLI
 - **Slack Workspace** with permissions to create and configure apps
-- **Cognito User Pool** (for manual deployment only) - configured with OAuth 2.0 client credentials (M2M authentication recommended) or username/password authentication. *Note: CloudFormation deployment creates this automatically.*
+- **Cognito User Pool** (for manual deployment only) - configured for OAuth 2.0 client credentials (M2M) authentication. *Note: CloudFormation deployment creates this automatically.*
 
 ### Deployment Options
 
@@ -98,7 +99,7 @@ AgentWatch offers two deployment paths:
 
 | Option | Best For | What It Does |
 |--------|----------|--------------|
-| **CloudFormation (Recommended)** | Quick setup, production deployments | One-click deployment of all AWS resources |
+| **CloudFormation (Recommended)** | Quick setup, production deployments | One-click deployment of the supporting AWS resources, followed by AgentCore deployment |
 | **Manual Deployment** | Learning, customization | Step-by-step setup with full control |
 
 ---
@@ -131,14 +132,17 @@ The script will prompt for:
 
 ```bash
 # From project root
-pip install bedrock-agentcore-starter-toolkit
-agentcore configure -e ambient_agent.py
-agentcore launch --agent AgentWatch
+python deployment/sync_agentcore_config.py --stack-name agentwatch
+./deployment/deploy_agentcore.sh --stack-name agentwatch --wait
 ```
 
 ### A4. Update Stack with AgentCore URL
 
 After AgentCore deployment, update the stack with the runtime URL:
+
+```bash
+python get_agent_url.py
+```
 
 ```bash
 aws cloudformation update-stack \
@@ -159,28 +163,9 @@ aws cloudformation update-stack \
 3. Set Request URL to the `SlackCommandEndpoint` from stack outputs
 4. Save changes
 
-### A6. Add AgentCore Permissions
+### A6. AgentCore Permissions
 
-```bash
-aws iam put-role-policy \
-  --role-name <YOUR_AGENTCORE_ROLE> \
-  --policy-name CloudWatchMonitoringAccess \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:DescribeAlarms",
-        "cloudwatch:ListDashboards",
-        "cloudwatch:GetDashboard",
-        "logs:DescribeLogGroups",
-        "logs:FilterLogEvents",
-        "logs:GetLogEvents"
-      ],
-      "Resource": "*"
-    }]
-  }'
-```
+The AgentCore runtime permissions required for CloudWatch, CloudWatch Logs, and STS access are configured as part of the included `agentcore/cdk` project. No extra manual IAM policy attachment is required for the default deployment flow.
 
 For more details, see [deployment/cloudformation/README.md](deployment/cloudformation/README.md).
 
@@ -215,16 +200,12 @@ AgentWatch integrates with Slack to deliver monitoring reports and respond to us
 
 AgentWatch uses AgentCore Identity with OAuth 2.0 for secure authentication. You need to configure a Cognito User Pool with appropriate app clients.
 
-For detailed instructions on setting up Cognito for AgentCore Identity, refer to the AgentCore documentation. You will need to configure either:
-
-- **M2M Authentication (Recommended)**: OAuth 2.0 Client Credentials flow for service-to-service authentication
-- **Username/Password Authentication (Fallback)**: USER_PASSWORD_AUTH flow with user credentials
+For detailed instructions on setting up Cognito for AgentCore Identity, refer to the AgentCore documentation. AgentWatch uses **M2M Authentication** with the OAuth 2.0 Client Credentials flow for service-to-service authentication.
 
 Save the following values from your Cognito configuration:
 - Cognito Domain URL
 - M2M Client ID and Client Secret (for M2M auth)
 - Resource Server ID (if using custom scopes)
-- User Pool ID, Client ID, and user credentials (for username/password auth)
 
 First, install the dependencies:
 
@@ -246,18 +227,11 @@ Before deploying to AgentCore Runtime, test the agent locally to ensure it works
 
 1. Clone this repository and navigate to the project directory
 2. Configure your AWS credentials and ensure you have access to CloudWatch, Lambda, and other services the agent will monitor
-3. Run the agent locally:
-   ```bash
-   uv run python ambient_agent.py
-   ```
-4. Test the agent by sending sample prompts:
-
-   Open another terminal in the same directory and start a Python interactive session:
+3. Start a Python interactive session from the project root:
    ```bash
    uv run python3
    ```
-
-   Then test the agent with sample prompts:
+4. Import the handler and invoke it with sample prompts:
    ```python
    >>> from ambient_agent import agent_handler
    >>> response = agent_handler({"prompt": "List my CloudWatch dashboards", "session_id": "test"})
@@ -270,6 +244,8 @@ Before deploying to AgentCore Runtime, test the agent locally to ensure it works
    >>> print(response)
    ```
 
+   The first invocation lazily initializes the Bedrock client and tools, so it can take a few seconds.
+
    Exit the Python session when done:
    ```python
    >>> exit()
@@ -281,61 +257,30 @@ Before deploying to AgentCore Runtime, test the agent locally to ensure it works
 
 Deploy the agent to AgentCore Runtime to make it available as a secure HTTP endpoint.
 
-1. Install the AgentCore CLI in the uv environment:
+1. Install the latest AgentCore CLI:
    ```bash
-   uv add bedrock-agentcore-starter-toolkit
+   npm install -g @aws/agentcore
    ```
 
-2. Update the `config.yaml` file with your model preferences and tool configurations
+2. Update the `config.yaml` file with your model preferences and tool configurations.
 
-3. Configure the agent:
+3. Sync the included `agentcore/` project with your AWS account and Cognito configuration:
    ```bash
-   uv run agentcore configure -e ambient_agent.py
+   python deployment/sync_agentcore_config.py
    ```
-   When prompted during configuration, provide the following values:
+   This updates `agentcore/aws-targets.json` for your current AWS account and, when `cognito_config.json` exists, adds the Cognito-backed `CUSTOM_JWT` authorizer to the runtime spec.
 
-   **Basic Configuration:**
-   - **Agent Name**: `AgentWatch` (or your preferred name)
-   - **Deployment Type**: Choose `direct_code_deploy`
-   - **Execution Role ARN**: Your AWS IAM role ARN for AgentCore Runtime
-
-   **OAuth Configuration** (use values from your `cognito_config.json` file):
-   - **OAuth discovery URL**: Use the `discovery_url` value from your cognito_config.json
-     ```
-     https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXXXXXXXX/.well-known/openid-configuration
-     ```
-   - **Allowed OAuth client IDs**: Use the `client_id` value from your cognito_config.json
-     ```
-     your_client_id_here
-     ```
-   - **Allowed OAuth audience**: Use the `resource_server_id` value from your cognito_config.json
-     ```
-     your_resource_server_id_here
-     ```
-
-   After configuration completes, verify the `.bedrock_agentcore.yaml` file was created with your settings.
-
-4. Launch the agent on AgentCore Runtime:
+4. Validate and deploy the agent on AgentCore Runtime:
    ```bash
-   uv run agentcore launch
+   ./deployment/agentcore_cli.sh validate
+   ./deployment/deploy_agentcore.sh --wait
    ```
 
 5. Get the AgentCore Runtime URL for Lambda configuration:
 
-   After deployment, you need to get the correct runtime URL. Use the provided script:
+   After deployment, get the runtime URL with the provided helper:
    ```bash
-   uv run python get_agent_url.py
-   ```
-
-   When prompted, enter your Bedrock AgentCore ARN from the `.bedrock_agentcore.yaml` file:
-   ```
-   Enter your Bedrock AgentCore ARN: arn:aws:bedrock-agentcore:us-east-1:ACCOUNT_ID:runtime/AgentWatch-XXXXX
-   ```
-
-   The script will output the invocation URL that you'll need for the Lambda configuration:
-   ```
-   Invocation URL:
-   https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3A...../invocations?qualifier=DEFAULT
+   python get_agent_url.py
    ```
 
    Copy this URL - you'll use it as `AGENTCORE_RUNTIME_URL` in your `.env` file.
@@ -418,10 +363,10 @@ When you make changes to the agent code, redeploy to AgentCore:
 
 ```bash
 # Using the provided script
-./deployment/redeploy_agentcore.sh --wait
+./deployment/deploy_agentcore.sh --wait
 
 # Or directly with agentcore CLI
-agentcore launch --agent AgentWatch
+./deployment/agentcore_cli.sh deploy -y
 ```
 
 The DEFAULT endpoint automatically points to the latest version.

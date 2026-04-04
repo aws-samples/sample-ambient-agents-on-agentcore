@@ -166,7 +166,7 @@ def lambda_handler(event, context):
                 resource_server_id=resource_server_id
             )
         else:
-            raise Exception("No valid authentication credentials provided. Need either M2M credentials or username/password")
+            raise Exception("Missing M2M authentication credentials for AgentCore invocation")
 
         # Step 2: Invoke AgentCore runtime via HTTP
         print(f"Invoking AgentCore runtime with prompt: {prompt[:100]}...")

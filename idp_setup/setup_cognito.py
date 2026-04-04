@@ -19,7 +19,8 @@ from utils import (
     get_or_create_user_pool,
     get_or_create_resource_server,
     get_or_create_m2m_client,
-    create_cognito_domain
+    create_cognito_domain,
+    resolve_aws_region,
 )
 
 # Configure logging
@@ -76,8 +77,7 @@ def main():
     
     try:
         # Get AWS session and region
-        boto_session = boto3.session.Session()
-        region = boto_session.region_name
+        region = resolve_aws_region()
         logger.info(f"Using AWS region: {region}")
         
         # Set up Cognito User Pool
@@ -85,7 +85,7 @@ def main():
         cognito = boto3.client("cognito-idp", region_name=region)
         
         # Use the simpler setup_cognito_user_pool function
-        cognito_config = setup_cognito_user_pool()
+        cognito_config = setup_cognito_user_pool(region=region)
         
         if cognito_config is None:
             logger.error("Failed to create Cognito User Pool")

@@ -17,7 +17,7 @@ Parameters:
   AgentCoreRuntimeUrl:
     Type: String
     Description: >
-      AgentCore runtime invocation URL. Deploy AgentCore first using 'agentcore launch',
+      AgentCore runtime invocation URL. Deploy AgentCore first using 'agentcore deploy',
       then use the URL from: https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<agent-arn>/invocations?qualifier=DEFAULT
     Default: ''
 
@@ -67,9 +67,9 @@ Resources:
       Identifier: !Sub '${AWS::StackName}-gateway'
       Name: AgentWatch Gateway
       Scopes:
-        - ScopeName: 'read'
+        - ScopeName: 'gateway:read'
           ScopeDescription: 'Read access to agent'
-        - ScopeName: 'write'
+        - ScopeName: 'gateway:write'
           ScopeDescription: 'Write access to agent'
 
   CognitoM2MClient:
@@ -82,8 +82,8 @@ Resources:
       AllowedOAuthFlows:
         - client_credentials
       AllowedOAuthScopes:
-        - !Sub '${AWS::StackName}-gateway/read'
-        - !Sub '${AWS::StackName}-gateway/write'
+        - !Sub '${AWS::StackName}-gateway/gateway:read'
+        - !Sub '${AWS::StackName}-gateway/gateway:write'
       AllowedOAuthFlowsUserPoolClient: true
       SupportedIdentityProviders:
         - COGNITO
@@ -252,7 +252,7 @@ Resources:
               response = http.request(
                   'POST',
                   token_url,
-                  body=f"grant_type=client_credentials&scope={resource_server_id}/read {resource_server_id}/write",
+                  body=f"grant_type=client_credentials&scope={resource_server_id}/gateway:read",
                   headers={
                       'Content-Type': 'application/x-www-form-urlencoded',
                       'Authorization': f'Basic {credentials}'
@@ -445,7 +445,7 @@ Outputs:
   NextSteps:
     Description: Instructions to complete setup
     Value: !Sub |
-      1. Deploy AgentCore: cd to project root and run 'agentcore launch --agent AgentWatch'
+      1. Deploy AgentCore: cd to project root and run './deployment/deploy_agentcore.sh'
       2. Get the AgentCore URL and update this stack's AgentCoreRuntimeUrl parameter
       3. Configure Slack slash command with endpoint: https://${SlackApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/slack-command
       4. Retrieve M2M client secret from Secrets Manager: ${M2MClientSecret}
