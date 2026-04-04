@@ -8,5 +8,8 @@ cdk/node_modules/
 # CLI Internals
 .cli/*
 
+# Local assistant context
+.llm-context/
+
 # Ephemeral Staging
 .cache/*
