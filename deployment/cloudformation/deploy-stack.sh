@@ -35,7 +35,7 @@ fi
 
 # Get AWS account info
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
-AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
+AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo "us-west-2")}}"
 
 echo -e "${GREEN}AWS Account:${NC} $AWS_ACCOUNT_ID"
 echo -e "${GREEN}AWS Region:${NC} $AWS_REGION"
@@ -144,10 +144,11 @@ echo -e "${BLUE}============================================${NC}"
 echo ""
 echo -e "${YELLOW}1. Deploy AgentCore Runtime:${NC}"
 echo "   cd $(dirname $SCRIPT_DIR)"
-echo "   agentcore launch --agent AgentWatch"
+echo "   python deployment/sync_agentcore_config.py --stack-name $STACK_NAME"
+echo "   ./deployment/deploy_agentcore.sh --stack-name $STACK_NAME --wait"
 echo ""
 echo -e "${YELLOW}2. Update stack with AgentCore URL:${NC}"
-echo "   After agentcore launch completes, run:"
+echo "   After the runtime deployment completes, run:"
 echo "   aws cloudformation update-stack \\"
 echo "     --stack-name $STACK_NAME \\"
 echo "     --use-previous-template \\"

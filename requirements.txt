@@ -3,7 +3,6 @@ boto3
 botocore
 langchain
 bedrock-agentcore
-bedrock-agentcore-starter-toolkit
 
 # LangChain dependencies
 langchain-core

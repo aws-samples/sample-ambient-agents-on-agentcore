@@ -84,19 +84,23 @@ def initialize_agent():
     # Create a boto3 client with custom timeout configuration
     bedrock_runtime_client = boto3.client(
         service_name='bedrock-runtime',
-        region_name=boto3.session.Session().region_name or 'us-east-1',
+        region_name=boto3.session.Session().region_name or 'us-west-2',
         config=bedrock_config
     )
+
+    model_kwargs = {
+        "temperature": agent_model_configuration["inference_parameters"]["temperature"],
+        "max_tokens": agent_model_configuration["inference_parameters"]["max_tokens"],
+    }
+    top_p = agent_model_configuration["inference_parameters"].get("top_p")
+    if top_p is not None:
+        model_kwargs["top_p"] = top_p
 
     # Initialize the model
     agent_model = ChatBedrock(
         client=bedrock_runtime_client,
         model=agent_model_configuration["model_id"],
-        model_kwargs={
-            "temperature": agent_model_configuration["inference_parameters"]["temperature"],
-            "max_tokens": agent_model_configuration["inference_parameters"]["max_tokens"],
-            "top_p": agent_model_configuration["inference_parameters"]["top_p"],
-        }
+        model_kwargs=model_kwargs
     )
     logger.info(f"Initialized Amazon Bedrock model: {agent_model_configuration['model_id']}")
 

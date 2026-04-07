@@ -15,6 +15,22 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def resolve_aws_region(default: str = "us-west-2") -> str:
+    """Resolve AWS region from env/session with a us-west-2 fallback."""
+    import os
+
+    for env_name in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+        env_region = os.environ.get(env_name)
+        if env_region:
+            return env_region
+
+    session_region = Session().region_name
+    if session_region:
+        return session_region
+
+    return default
+
+
 def load_config(
     config_file: Union[Path, str]
 ) -> Optional[Dict]:
@@ -75,9 +91,8 @@ def load_system_prompt(
         logger.error(f"Error loading system prompt from {prompt_path}: {str(e)}")
         raise
 
-def setup_cognito_user_pool():
-    boto_session = Session()
-    region = boto_session.region_name
+def setup_cognito_user_pool(region: Optional[str] = None):
+    region = region or resolve_aws_region()
     
     # Initialize Cognito client
     cognito_client = boto3.client('cognito-idp', region_name=region)
@@ -207,8 +222,7 @@ def create_cognito_domain(
         Exception: If domain creation fails
     """
     if region is None:
-        boto_session = Session()
-        region = boto_session.region_name
+        region = resolve_aws_region()
     
     cognito_client = boto3.client('cognito-idp', region_name=region)
     

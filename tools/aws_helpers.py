@@ -11,14 +11,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Default region - can be overridden by AWS_DEFAULT_REGION environment variable
-DEFAULT_REGION = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+# Default region - can be overridden by AWS_REGION or AWS_DEFAULT_REGION
+DEFAULT_REGION = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION', 'us-west-2')
 
 
 def _get_region() -> str:
-    """Get the AWS region from environment or session, defaulting to us-east-1."""
+    """Get the AWS region from environment or session, defaulting to us-west-2."""
     # Try environment variable first
-    region = os.environ.get('AWS_DEFAULT_REGION') or os.environ.get('AWS_REGION')
+    region = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
     if region:
         return region
 
@@ -30,8 +30,8 @@ def _get_region() -> str:
     except Exception:
         pass
 
-    # Default to us-east-1
-    return 'us-east-1'
+    # Default to us-west-2
+    return 'us-west-2'
 
 
 def _get_cross_account_client(
@@ -47,7 +47,7 @@ def _get_cross_account_client(
         service: AWS service name (e.g., 'cloudwatch', 'logs', 'sts')
         account_id: Target AWS account ID for cross-account access
         role_name: IAM role name to assume in target account
-        region: AWS region (defaults to us-east-1 if not specified)
+        region: AWS region (defaults to us-west-2 if not specified)
 
     Returns:
         Boto3 client for the specified service
