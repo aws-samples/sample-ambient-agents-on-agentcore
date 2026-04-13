@@ -112,17 +112,22 @@ def build_auth_from_stack(stack_name: str, region: str) -> Dict[str, Any]:
         for entry in stacks[0].get("Outputs", [])
     }
 
-    domain_url = outputs.get("CognitoDomainUrl")
+    user_pool_id = outputs.get("CognitoUserPoolId")
     client_id = outputs.get("M2MClientId")
     resource_server_id = outputs.get("ResourceServerId")
 
-    if not domain_url or not client_id:
+    if not user_pool_id or not client_id:
         raise ValueError(
-            f"Stack {stack_name} is missing CognitoDomainUrl or M2MClientId outputs"
+            f"Stack {stack_name} is missing CognitoUserPoolId or M2MClientId outputs"
         )
 
+    discovery_url = (
+        f"https://cognito-idp.{region}.amazonaws.com/"
+        f"{user_pool_id}/.well-known/openid-configuration"
+    )
+
     auth_config: Dict[str, Any] = {
-        "discoveryUrl": f"{domain_url.rstrip('/')}/.well-known/openid-configuration",
+        "discoveryUrl": discovery_url,
         "allowedClients": [client_id],
     }
     if resource_server_id:

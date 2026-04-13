@@ -122,6 +122,10 @@ Resources:
                   - logs:FilterLogEvents
                   - logs:GetLogEvents
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-scheduled-monitor'
 
   #############################################
   # Lambda Function
@@ -144,6 +148,7 @@ Resources:
           SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
           COGNITO_DOMAIN_URL: !Sub 'https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com'
           M2M_CLIENT_ID: !Ref CognitoM2MClient
+          M2M_CLIENT_SECRET: !GetAtt CognitoM2MClient.ClientSecret
           RESOURCE_SERVER_ID: !Sub '${AWS::StackName}-gateway'
       Code:
         ZipFile: |
@@ -160,6 +165,11 @@ Resources:
 
           def lambda_handler(event, context):
               """Lambda handler for monitoring checks - supports EventBridge and Slack."""
+
+              # Async self-invocation for Slack processing
+              if event.get('async_slack'):
+                  handle_async_slack(event)
+                  return {'statusCode': 200}
 
               # Determine trigger type
               is_slack_request = 'body' in event or 'requestContext' in event
@@ -208,8 +218,22 @@ Resources:
                           })
                       }
 
-                  # Acknowledge immediately
-                  ack_response = {
+                  # Invoke self asynchronously to process the request
+                  import boto3
+                  lambda_client = boto3.client('lambda')
+                  lambda_client.invoke(
+                      FunctionName=context.function_name,
+                      InvocationType='Event',
+                      Payload=json.dumps({
+                          'async_slack': True,
+                          'user_text': user_text,
+                          'user_name': user_name,
+                          'response_url': response_url
+                      })
+                  )
+
+                  # Return acknowledgment to Slack immediately
+                  return {
                       'statusCode': 200,
                       'headers': {'Content-Type': 'application/json'},
                       'body': json.dumps({
@@ -218,23 +242,25 @@ Resources:
                       })
                   }
 
-                  # Process async and post to response_url
-                  try:
-                      response_text = invoke_agent(user_text)
-                      if response_url:
-                          post_to_response_url(response_url, response_text, user_name)
-                  except Exception as e:
-                      if response_url:
-                          post_to_response_url(response_url, f"❌ Error: {str(e)}", user_name)
-
-                  return ack_response
-
               except Exception as e:
                   return {
                       'statusCode': 200,
                       'headers': {'Content-Type': 'application/json'},
                       'body': json.dumps({'text': f'Error: {str(e)}'})
                   }
+
+          def handle_async_slack(event):
+              """Handle the async portion of a Slack request."""
+              user_text = event['user_text']
+              user_name = event['user_name']
+              response_url = event['response_url']
+              try:
+                  response_text = invoke_agent(user_text)
+                  if response_url:
+                      post_to_response_url(response_url, response_text, user_name)
+              except Exception as e:
+                  if response_url:
+                      post_to_response_url(response_url, f"❌ Error: {str(e)}", user_name)
 
           def get_bearer_token():
               """Get OAuth2 token using M2M client credentials."""
@@ -287,6 +313,19 @@ Resources:
 
               return response.data.decode()
 
+          def format_for_slack(text):
+              """Convert agent markdown response to Slack mrkdwn format."""
+              import re
+              # Decode escaped newlines to real newlines
+              text = text.replace('\\n', '\n')
+              # Strip wrapping quotes if present
+              text = text.strip('"')
+              # Convert markdown headers to Slack bold
+              text = re.sub(r'^#{1,3}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+              # Convert **bold** to *bold*
+              text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+              return text
+
           def post_to_slack(message, is_scheduled=False):
               """Post message to Slack webhook."""
               webhook_url = os.environ.get('SLACK_WEBHOOK_URL')
@@ -295,11 +334,12 @@ Resources:
 
               timestamp = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())
               prefix = "📊 *Scheduled Monitoring Report*" if is_scheduled else "🤖 *Agent Response*"
+              formatted = format_for_slack(message)
 
               slack_message = {
                   'blocks': [
                       {'type': 'section', 'text': {'type': 'mrkdwn', 'text': prefix}},
-                      {'type': 'section', 'text': {'type': 'mrkdwn', 'text': message[:2900]}},
+                      {'type': 'section', 'text': {'type': 'mrkdwn', 'text': formatted[:2900]}},
                       {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': f"Time: {timestamp}"}]}
                   ]
               }
@@ -309,9 +349,10 @@ Resources:
 
           def post_to_response_url(response_url, message, user_name):
               """Post response to Slack response URL."""
+              formatted = format_for_slack(message)
               slack_message = {
                   'response_type': 'in_channel',
-                  'text': f"Response for @{user_name}:\n{message[:2900]}"
+                  'text': f"Response for @{user_name}:\n{formatted[:2900]}"
               }
               http.request('POST', response_url, body=json.dumps(slack_message),
                           headers={'Content-Type': 'application/json'})

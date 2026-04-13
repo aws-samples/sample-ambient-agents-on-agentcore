@@ -72,11 +72,7 @@ Every 15 minutes, AgentWatch automatically generates and posts comprehensive mon
 
 ![User Question](img/on_demand_question_example_1.png)
 
-Users can ask specific questions through Slack slash commands to investigate issues or get real-time information.
-
-![Agent Response](img/on_demand_answer_example_2.png)
-
-The agent processes the question and provides detailed, context-aware responses based on current AWS infrastructure state.
+Users can ask specific questions through Slack slash commands to investigate issues or get real-time information. The agent processes the question and provides detailed, context-aware responses based on current AWS infrastructure state.
 
 ## Getting Started
 
@@ -124,25 +120,34 @@ cd deployment/cloudformation
 ```
 
 The script will prompt for:
-- Slack Webhook URL
-- Slack Signing Secret
-- Cognito Domain Prefix (unique identifier)
+- **Stack name** [agentwatch]: Leave the default
+- **Slack Webhook URL**: Paste the webhook URL from step A1
+- **Slack Signing Secret**: Paste the signing secret from step A1
+- **Cognito Domain Prefix** (unique identifier): Leave the default
+- **AgentCore Runtime URL**: Leave blank to configure later
+
+> **Note:** The script creates all supporting infrastructure including a Cognito User Pool, M2M client, Lambda function, EventBridge rule, and API Gateway.
 
 ### A3. Deploy AgentCore Runtime
 
 ```bash
 # From project root
-python deployment/sync_agentcore_config.py --stack-name agentwatch
+# Use python3 (or python depending on your system)
+python3 deployment/sync_agentcore_config.py --stack-name agentwatch
 ./deployment/deploy_agentcore.sh --stack-name agentwatch --wait
 ```
 
+The `sync_agentcore_config.py` script reads the CloudFormation stack outputs and configures `agentcore/agentcore.json` with the correct OIDC discovery URL and Cognito client settings. The `deploy_agentcore.sh` script then validates, builds, and deploys the agent to AgentCore Runtime. The `--wait` flag blocks until the runtime reports READY.
+
 ### A4. Update Stack with AgentCore URL
 
-After AgentCore deployment, update the stack with the runtime URL:
+After AgentCore deployment, retrieve the runtime URL and update the stack:
 
 ```bash
-python get_agent_url.py
+uv run python3 get_agent_url.py
 ```
+
+Copy the `Invocation URL` from the output and use it in the update command:
 
 ```bash
 aws cloudformation update-stack \
@@ -156,16 +161,37 @@ aws cloudformation update-stack \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
+Wait for the update to complete:
+
+```bash
+aws cloudformation wait stack-update-complete --stack-name agentwatch
+```
+
 ### A5. Configure Slack Slash Command
 
 1. Go to your Slack app → **Slash Commands**
 2. Create `/ask` command
-3. Set Request URL to the `SlackCommandEndpoint` from stack outputs
-4. Save changes
+3. Set **Request URL** to the `SlackCommandEndpoint` from stack outputs (format: `https://XXXXXXXXXX.execute-api.<region>.amazonaws.com/prod/slack-command`)
+4. Set **Short Description** to "Ask the AgentWatch monitoring agent a question"
+5. Save changes and reinstall the app to your workspace if prompted
 
 ### A6. AgentCore Permissions
 
 The AgentCore runtime permissions required for CloudWatch, CloudWatch Logs, and STS access are configured as part of the included `agentcore/cdk` project. No extra manual IAM policy attachment is required for the default deployment flow.
+
+### A7. Test the Deployment
+
+**Test on-demand questions:** In your Slack workspace, run:
+```
+/ask What is the status of my CloudWatch alarms?
+```
+
+You should see an immediate acknowledgment ("Processing request from @user...") followed by a detailed response from the agent.
+
+**Test scheduled monitoring:** The EventBridge rule triggers every 15 minutes. You can also trigger it manually:
+```bash
+aws lambda invoke --function-name agentwatch-scheduled-monitor --payload '{}' /tmp/response.json && cat /tmp/response.json
+```
 
 For more details, see [deployment/cloudformation/README.md](deployment/cloudformation/README.md).
 
@@ -227,8 +253,9 @@ Before deploying to AgentCore Runtime, test the agent locally to ensure it works
 
 1. Clone this repository and navigate to the project directory
 2. Configure your AWS credentials and ensure you have access to CloudWatch, Lambda, and other services the agent will monitor
-3. Start a Python interactive session from the project root:
+3. Install dependencies and start a Python interactive session from the project root:
    ```bash
+   uv sync
    uv run python3
    ```
 4. Import the handler and invoke it with sample prompts:
@@ -266,7 +293,7 @@ Deploy the agent to AgentCore Runtime to make it available as a secure HTTP endp
 
 3. Sync the included `agentcore/` project with your AWS account and Cognito configuration:
    ```bash
-   python deployment/sync_agentcore_config.py
+   python3 deployment/sync_agentcore_config.py
    ```
    This updates `agentcore/aws-targets.json` for your current AWS account and, when `cognito_config.json` exists, adds the Cognito-backed `CUSTOM_JWT` authorizer to the runtime spec.
 
@@ -280,10 +307,10 @@ Deploy the agent to AgentCore Runtime to make it available as a secure HTTP endp
 
    After deployment, get the runtime URL with the provided helper:
    ```bash
-   python get_agent_url.py
+   uv run python3 get_agent_url.py
    ```
 
-   Copy this URL - you'll use it as `AGENTCORE_RUNTIME_URL` in your `.env` file.
+   Copy the `Invocation URL` from the output - you'll use it as `AGENTCORE_RUNTIME_URL` in your `.env` file.
 
 ### Step 5: Configure Environment Variables
 
@@ -374,6 +401,32 @@ The DEFAULT endpoint automatically points to the latest version.
 ---
 
 ## Troubleshooting
+
+### OIDC Discovery Endpoint Not Valid (AgentCore Deployment Failure)
+
+If you see an error like this during AgentCore deployment:
+
+```
+OIDC discovery endpoint is not valid. (Service: AgentCredentialProvider, Status Code: 400)
+```
+
+This means the Cognito OIDC discovery URL in `agentcore/agentcore.json` is incorrect. Cognito serves its OIDC discovery document at the **User Pool IDP URL**, not the custom auth domain:
+
+- **Correct:** `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>/.well-known/openid-configuration`
+- **Incorrect:** `https://<domain>.auth.<region>.amazoncognito.com/.well-known/openid-configuration`
+
+**To fix:** Re-run `python3 deployment/sync_agentcore_config.py --stack-name agentwatch` and redeploy with `./deployment/deploy_agentcore.sh --wait`.
+
+### Token Request Failed: 400 (Lambda Invocation)
+
+If Slack shows `Error: Token request failed: 400`, the Lambda function is missing the `M2M_CLIENT_SECRET` environment variable. Verify it is set:
+
+```bash
+aws lambda get-function-configuration --function-name agentwatch-scheduled-monitor \
+  --query "Environment.Variables.M2M_CLIENT_SECRET" --output text
+```
+
+If it returns `None`, redeploy the CloudFormation stack. The template wires the secret from the Cognito M2M client into the Lambda automatically.
 
 ### Architecture Mismatch on Apple Silicon Macs (ARM64)
 
